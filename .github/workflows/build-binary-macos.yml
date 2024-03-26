@@ -1,0 +1,67 @@
+name: Build Binary MacOS Packages
+
+on:
+  release:
+    types: [created]
+
+jobs:
+
+  macos:
+    name: Build macOS package
+    strategy:
+      matrix:
+        ghc: ["8.6.5"]
+        cabal: ["3.6"]
+        os: ["macos-11", "macos-12"] # 
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: GrammaticalFramework/gf-core
+        token: ${{ secrets.GH_TOKEN }} 
+        path: .
+        ref: master
+
+    - name: Setup Haskell
+      uses: haskell-actions/setup@v2
+      id: setup-haskell-cabal
+      with:
+        ghc-version: ${{ matrix.ghc }}
+        cabal-version: ${{ matrix.cabal }}
+
+    - name: Install build tools
+      run: |
+        cabal v1-install alex happy
+        brew install automake
+      #  sudo -H pip install setuptools
+
+    - name: Disable Python build
+      run: |
+        sed -i '' "39,54s/^/# /" bin/build-binary-dist.sh
+
+    - name: Build package
+      run: |
+        sudo mkdir -p /Library/Java/Home
+        sudo ln -s /usr/local/opt/openjdk/include /Library/Java/Home/include
+        make pkg
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: gf-${{ matrix.os }}
+        path: dist/gf-*.pkg
+        if-no-files-found: error
+    
+    - name: Rename package
+      run: |
+          mv dist/gf-*.pkg dist/gf-${{ github.event.release.tag_name }}-${{ matrix.os }}.pkg
+
+    - uses: actions/upload-release-asset@v1.0.2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: dist/gf-${{ github.event.release.tag_name }}-${{ matrix.os }}.pkg
+        asset_name: gf-${{ github.event.release.tag_name }}-${{ matrix.os }}.pkg
+        asset_content_type: application/octet-stream

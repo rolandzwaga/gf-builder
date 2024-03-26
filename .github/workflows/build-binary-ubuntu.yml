@@ -1,0 +1,79 @@
+name: Build Binary Ubuntu Packages
+
+on:
+  release:
+    types: [created]
+
+jobs:
+
+# ---
+
+  ubuntu:
+    name: Build Ubuntu package
+    strategy:
+      matrix:
+        ghc: ["8.6.5"]
+        cabal: ["3.0.0.0"]
+        os:
+        - ubuntu-22.04
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: GrammaticalFramework/gf-core
+        token: ${{ secrets.GH_TOKEN }} 
+        path: .
+        ref: master
+
+    - name: Install build tools
+      run: |
+        ghcup install ghc --set ${{ matrix.ghc }}
+        ghcup install cabal --set ${{ matrix.cabal }}
+        sudo apt-get update
+        sudo apt-get -y install \
+          alex \
+          happy \
+          build-essential \
+          make \
+          dpkg-dev \
+          debhelper \
+          libghc-json-dev \
+          python3-dev python-dev-is-python3 \
+          default-jdk \
+          libtool-bin
+
+    - name: Tweak debian config
+      run: |
+        sed -i'' "6s/haskell-platform (>= 2011.2.0.1), //" debian/control
+        sed -i'' "6s/python-dev/python3-dev/" debian/control
+        sed -i'' "s|^.*src/runtime/java|#&|" debian/rules
+
+    - name: Build package
+      run: |
+        make deb
+
+    - name: Copy package
+      run: |
+        cp ../gf_*.deb dist/
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: gf-${{ matrix.os }}.deb
+        path: dist/gf_*.deb
+        if-no-files-found: error
+
+    - name: Rename package for specific ubuntu version
+      run: |
+        mv dist/gf_*.deb dist/gf-${{ github.event.release.tag_name }}-${{ matrix.os }}.deb
+
+    - uses: actions/upload-release-asset@v1.0.2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: dist/gf-${{ github.event.release.tag_name }}-${{ matrix.os }}.deb
+        asset_name: gf-${{ github.event.release.tag_name }}-${{ matrix.os }}.deb
+        asset_content_type: application/octet-stream

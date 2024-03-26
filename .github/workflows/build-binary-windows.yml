@@ -1,0 +1,91 @@
+name: Build Binary Windows Packages
+
+on:
+  workflow_dispatch
+#  release:
+#    types: [created]
+
+jobs:
+
+# ---
+  windows:
+    name: Build Windows package
+    strategy:
+      matrix:
+        ghc: ["8.6.5"]
+        cabal: ["2.4"]
+        os: ["windows-2019"]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: GrammaticalFramework/gf-core
+        token: ${{ secrets.GH_TOKEN }} 
+        path: .
+        ref: master
+
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        install: >-
+          base-devel
+          autotools
+          gcc
+          python-devel
+    
+    - name: Prepare dist folder
+      shell: msys2 {0}
+      run: |
+        mkdir /c/tmp-dist
+        mkdir /c/tmp-dist/c
+        mkdir /c/tmp-dist/java
+        mkdir /c/tmp-dist/python
+
+    - name: Build C runtime
+      shell: msys2 {0}
+      run: |
+        cd src/runtime/c
+        autoreconf -i
+        ./configure
+        make
+        make install
+        cp /mingw64/bin/libpgf-0.dll /c/tmp-dist/c
+        cp /mingw64/bin/libgu-0.dll /c/tmp-dist/c
+
+    - name: Setup Haskell
+      uses: actions/setup-haskell@v1.1
+      id: setup-haskell-cabal
+      with:
+        ghc-version: ${{ matrix.ghc }}
+        cabal-version: ${{ matrix.cabal }}
+
+    - name: Install Haskell build tools
+      run: |
+        cabal install alex happy
+
+    - name: Build GF
+      run: |
+        cabal install --only-dependencies -fserver
+        cabal configure -fserver
+        cabal build
+        copy dist\build\gf\gf.exe C:\tmp-dist
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: gf-windows
+        path: C:\tmp-dist\*
+        if-no-files-found: error
+
+    - name: Create archive
+      run: |
+        Compress-Archive C:\tmp-dist C:\gf-${{ github.event.release.tag_name }}-windows.zip
+    - uses: actions/upload-release-asset@v1.0.2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: C:\gf-${{ github.event.release.tag_name }}-windows.zip
+        asset_name: gf-${{ github.event.release.tag_name }}-windows.zip
+        asset_content_type: application/zip
